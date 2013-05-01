@@ -14,12 +14,13 @@
 static dev_t first; // Global variable for the first device number 
 static struct cdev c_dev; // Global variable for the character device structure
 static struct class *cl; // Global variable for the device class
+static char c;
 
 /* Module's input parameters */
 static char *cdev_name = "jukebox";
-
 module_param(cdev_name, charp, 0000);
 MODULE_PARM_DESC(cdev_name, " Define a different name for your /dev file. By default, it is /dev/jukebox.");
+
 
 
 /** 
@@ -37,8 +38,6 @@ int keyboard_listener(struct notifier_block *nblock, unsigned long code, void *_
 		(param->down ? "down" : "up"),
 		param->shift,
 		param->ledstate);
-
-	
   }
 
   return NOTIFY_OK;
@@ -50,7 +49,7 @@ int keyboard_listener(struct notifier_block *nblock, unsigned long code, void *_
  */
 int init_dev_file()
 {
-  if (alloc_chrdev_region(&first, 0, 1, "Shweta") < 0)
+  if (alloc_chrdev_region(&first, 0, 1, cdev_name) < 0)
   {
     return -1;
   }
@@ -59,7 +58,7 @@ int init_dev_file()
     unregister_chrdev_region(first, 1);
     return -1;
   }
-    if (device_create(cl, NULL, first, NULL, &cdev_name) == NULL)
+    if (device_create(cl, NULL, first, NULL, cdev_name) == NULL)
   {
     class_destroy(cl);
     unregister_chrdev_region(first, 1);
@@ -96,8 +95,11 @@ void clear_dev_file()
  */
 ssize_t read_dev_file(struct file *f, char __user *buf, size_t len, loff_t *off)
 {
-  printk(KERN_INFO "Driver: read()\n");
-  return 0;
+    printk(KERN_INFO "Driver: read()\n");
+    if (copy_to_user(buf, &c, 1) != 0)
+        return -EFAULT;
+    else
+        return 1;
 }
 
 /**
@@ -106,8 +108,11 @@ ssize_t read_dev_file(struct file *f, char __user *buf, size_t len, loff_t *off)
  */
 ssize_t write_dev_file(struct file *f, const char __user *buf, size_t len, loff_t *off)
 {
-  printk(KERN_INFO "Driver: write()\n");
-  return len;
+    printk(KERN_INFO "Driver: write()\n");
+    if (copy_from_user(&c, buf + len - 1, 1) != 0)
+        return -EFAULT;
+    else
+        return len;
 }
 
 
