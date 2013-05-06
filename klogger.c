@@ -14,7 +14,7 @@ static struct proc_dir_entry *proc_entry; /* structure that stores proc file inf
 
 /* Module's input parameters */
 static char *proc_filename = "jukebox";
-static char *scan_code = "RAW";
+static char *scan_code = "SET1";
 
 module_param(proc_filename, charp, 0000);
 MODULE_PARM_DESC(proc_filename, " Define a different name for your proc file. By default, it is /proc/jukebox.");
